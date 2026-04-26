@@ -342,7 +342,8 @@ with st.sidebar:
     st.title("AQI Dashboard")
     st.markdown("---")
     selected_city  = st.selectbox("Select City", sorted(CITY_COORDS.keys()))
-    selected_year  = st.selectbox("Select Year", sorted(df["Year"].unique(), reverse=True))
+    selected_year  = st.selectbox("Historical Data Year", sorted(df["Year"].unique(), reverse=True))
+    st.caption("📅 Year filter applies to historical charts only. Forecast always starts from today.")
     forecast_days  = st.slider("Forecast Days", 1, 7, 7)
     st.markdown("---")
     st.subheader("Your Profile")
@@ -365,6 +366,7 @@ with st.sidebar:
 
 city_df     = df[(df["City"] == selected_city) & (df["Year"] == selected_year)]
 filtered_df = df[df["Year"] == selected_year]
+city_df_all = df[df["City"] == selected_city]  # all years for seasonal analysis
 
 st.title("India AQI and Health Risk Dashboard")
 if user_name:
@@ -518,6 +520,48 @@ if not city_df.empty:
     ft.update_traces(line_color="#00b4d8")
     st.plotly_chart(ft, use_container_width=True)
 
+st.markdown("---")
+st.subheader(f"Seasonal AQI Analysis — {selected_city}")
+if not city_df_all.empty and "Datetime" in city_df_all.columns:
+    city_df_all["Month"] = city_df["Datetime"].dt.month
+    city_df_all["Season"] = city_df_all["Month"].map({
+        12:"Winter", 1:"Winter", 2:"Winter",
+        3:"Spring", 4:"Spring", 5:"Spring",
+        6:"Summer", 7:"Summer", 8:"Summer",
+        9:"Autumn", 10:"Autumn", 11:"Autumn"
+    })
+    season_colors = {"Winter":"#74b9ff","Spring":"#55efc4","Summer":"#fd79a8","Autumn":"#fdcb6e"}
+    col_s1, col_s2 = st.columns(2)
+    with col_s1:
+        seas = city_df_all.groupby("Season")["US_AQI"].mean().reset_index()
+        seas["Season"] = pd.Categorical(seas["Season"], categories=["Winter","Spring","Summer","Autumn"], ordered=True)
+        seas = seas.sort_values("Season")
+        fig_seas = px.bar(seas, x="Season", y="US_AQI",
+            color="Season", color_discrete_map=season_colors,
+            title=f"Average AQI by Season — {selected_city}", template="plotly_dark")
+        fig_seas.update_layout(showlegend=False)
+        st.plotly_chart(fig_seas, use_container_width=True)
+    with col_s2:
+        city_df["Hour"] = city_df["Datetime"].dt.hour
+        hourly = city_df.groupby(["Hour","Season"])["US_AQI"].mean().reset_index()
+        fig_hour = px.line(hourly, x="Hour", y="US_AQI", color="Season",
+            color_discrete_map=season_colors,
+            title=f"Hourly AQI Pattern by Season — {selected_city}", template="plotly_dark")
+        fig_hour.update_layout(xaxis_title="Hour of Day", yaxis_title="Average AQI")
+        st.plotly_chart(fig_hour, use_container_width=True)
+    # Monthly heatmap
+    city_df_all["Year_col"] = city_df_all["Datetime"].dt.year
+    monthly_pivot = city_df_all.groupby(["Year_col","Month"])["US_AQI"].mean().reset_index()
+    monthly_pivot["Year_col"] = monthly_pivot["Year_col"].astype(int).astype(str)
+    monthly_pivot = monthly_pivot.pivot(index="Year_col", columns="Month", values="US_AQI")
+    monthly_pivot.columns = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][:len(monthly_pivot.columns)]
+    fig_heat = px.imshow(monthly_pivot, color_continuous_scale="RdYlGn_r",
+        title=f"Monthly AQI Heatmap — Historical Pattern (2022-2025) — {selected_city}", template="plotly_dark",
+        labels=dict(x="Month", y="Year", color="AQI"))
+    fig_heat.update_yaxes(type="category")
+    st.plotly_chart(fig_heat, use_container_width=True)
+
+
 st.subheader("India AQI Map")
 md = filtered_df.groupby(["City", "Latitude", "Longitude", "AQI_Category"])["US_AQI"].mean().reset_index()
 st.plotly_chart(
@@ -565,6 +609,77 @@ rk.columns = ["City", "Average AQI"]
 rk.insert(0, "Rank", range(1, len(rk) + 1))
 st.dataframe(rk.style.background_gradient(subset=["Average AQI"], cmap="RdYlGn_r"),
              use_container_width=True)
+
+st.markdown("---")
+st.subheader("About the Model — CNN-BiLSTM with Attention")
+
+st.markdown("""
+The forecast is powered by a **hybrid deep learning model** trained individually for each city.
+
+**Architecture:**
+- 🔷 **Conv1D Block** — 2 layers (64 filters) to extract local pollution patterns
+- 🔷 **BiLSTM Block 1** — 128 units (bidirectional) for long-range temporal learning
+- 🔷 **BiLSTM Block 2** — 64 units for higher-level abstractions
+- 🔷 **Temporal Attention** — weights important time steps automatically
+- 🔷 **Dense Head** — 128 → 64 → 32 → 1 (AQI output)
+
+**Training:** 48-hour input sequences | Huber loss | Adam optimizer | EarlyStopping
+""")
+
+st.markdown("#### XGBoost Model Performance — All Cities")
+model_results = [
+    {"City":"Agartala","RMSE":1.84,"MAE":0.87,"R²":0.9980},
+    {"City":"Ahmedabad","RMSE":1.46,"MAE":0.75,"R²":0.9982},
+    {"City":"Aizawl","RMSE":0.74,"MAE":0.55,"R²":0.9965},
+    {"City":"Bengaluru","RMSE":0.86,"MAE":0.59,"R²":0.9991},
+    {"City":"Bhopal","RMSE":0.92,"MAE":0.56,"R²":0.9994},
+    {"City":"Bhubaneswar","RMSE":0.99,"MAE":0.63,"R²":0.9994},
+    {"City":"Chandigarh","RMSE":2.82,"MAE":1.39,"R²":0.9891},
+    {"City":"Chennai","RMSE":2.25,"MAE":1.08,"R²":0.9930},
+    {"City":"Dehradun","RMSE":2.50,"MAE":1.24,"R²":0.9882},
+    {"City":"Delhi","RMSE":9.91,"MAE":2.51,"R²":0.9802},
+    {"City":"Gangtok","RMSE":1.01,"MAE":0.67,"R²":0.9963},
+    {"City":"Gurugram","RMSE":27.63,"MAE":5.09,"R²":0.9716},
+    {"City":"Guwahati","RMSE":0.87,"MAE":0.55,"R²":0.9967},
+    {"City":"Hyderabad","RMSE":0.85,"MAE":0.58,"R²":0.9994},
+    {"City":"Imphal","RMSE":0.64,"MAE":0.46,"R²":0.9971},
+    {"City":"Itanagar","RMSE":0.73,"MAE":0.53,"R²":0.9961},
+    {"City":"Jaipur","RMSE":1.83,"MAE":0.98,"R²":0.9968},
+    {"City":"Kohima","RMSE":0.68,"MAE":0.51,"R²":0.9963},
+    {"City":"Kolkata","RMSE":1.49,"MAE":0.81,"R²":0.9992},
+    {"City":"Lucknow","RMSE":1.06,"MAE":0.66,"R²":0.9992},
+    {"City":"Mumbai","RMSE":4.61,"MAE":1.57,"R²":0.9924},
+    {"City":"Panaji","RMSE":0.94,"MAE":0.55,"R²":0.9985},
+    {"City":"Patna","RMSE":1.26,"MAE":0.78,"R²":0.9991},
+    {"City":"Raipur","RMSE":0.76,"MAE":0.56,"R²":0.9995},
+    {"City":"Ranchi","RMSE":1.05,"MAE":0.66,"R²":0.9994},
+    {"City":"Shillong","RMSE":1.08,"MAE":0.73,"R²":0.9942},
+    {"City":"Shimla","RMSE":2.35,"MAE":1.23,"R²":0.9902},
+    {"City":"Thiruvananthapuram","RMSE":1.05,"MAE":0.57,"R²":0.9951},
+    {"City":"Visakhapatnam","RMSE":0.80,"MAE":0.50,"R²":0.9993},
+]
+perf_df = pd.DataFrame(model_results)
+
+col_m1, col_m2 = st.columns(2)
+with col_m1:
+    fig_r2 = px.bar(perf_df.sort_values("R²"), x="R²", y="City", orientation="h",
+        color="R²", color_continuous_scale="Greens",
+        title="R² Score by City (Higher = Better)", template="plotly_dark")
+    fig_r2.update_layout(yaxis=dict(tickfont=dict(size=10)), height=600)
+    st.plotly_chart(fig_r2, use_container_width=True)
+with col_m2:
+    fig_rmse = px.bar(perf_df.sort_values("RMSE", ascending=False), x="RMSE", y="City", orientation="h",
+        color="RMSE", color_continuous_scale="Reds",
+        title="RMSE by City (Lower = Better)", template="plotly_dark")
+    fig_rmse.update_layout(yaxis=dict(tickfont=dict(size=10)), height=600)
+    st.plotly_chart(fig_rmse, use_container_width=True)
+
+with st.expander("📊 Full Performance Table"):
+    st.dataframe(
+        perf_df.style.background_gradient(subset=["R²"], cmap="Greens")
+                     .background_gradient(subset=["RMSE","MAE"], cmap="Reds_r"),
+        use_container_width=True
+    )
 
 st.markdown("---")
 st.caption("Live data refreshes every 30 min. Powered by CNN-BiLSTM, OpenWeatherMap and Open-Meteo.")
