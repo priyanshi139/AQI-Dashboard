@@ -37,7 +37,7 @@ def _gdrive_download(file_id, dest):
     """Download a file from Google Drive by file ID."""
     import gdown
     url = f"https://drive.google.com/uc?id={file_id}"
-    gdown.download(url, dest, quiet=False, fuzzy=True)
+    gdown.download(url, dest, quiet=False)
 
 @st.cache_resource(show_spinner="Downloading data from Google Drive...")
 def ensure_data():
