@@ -11,7 +11,17 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta, date
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
-from keras.models import load_model
+# Keras loaded lazily to support deployment environments
+load_model = None
+def _get_load_model():
+    global load_model
+    if load_model is None:
+        try:
+            from keras.models import load_model as _lm
+            load_model = _lm
+        except Exception:
+            load_model = None
+    return load_model
 
 # CONFIG
 DATA_PATH   = r"C:\Users\Priya\Downloads\INDIA_AQI_CLEANED.csv"
@@ -236,12 +246,16 @@ def load_model_city(city):
     model = None
     if os.path.exists(keras_path):
         try:
-            model = load_model(keras_path, compile=False)
+            _lm = _get_load_model()
+            if _lm is None: model = None
+            else: model = _lm(keras_path, compile=False)
         except Exception:
             model = None
     if model is None and os.path.exists(h5_path):
         try:
-            model = load_model(h5_path, compile=False)
+            _lm = _get_load_model()
+            if _lm is None: model = None
+            else: model = _lm(h5_path, compile=False)
         except Exception:
             model = None
     if model is None:
