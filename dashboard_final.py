@@ -24,8 +24,39 @@ def _get_load_model():
     return load_model
 
 # CONFIG
-DATA_PATH   = r"C:\Users\Priya\Downloads\INDIA_AQI_CLEANED.csv"
-MODELS_DIR  = "models"
+# ── Google Drive IDs ──────────────────────────────────────────
+DATA_FILE_ID   = "1uk0XHNkWyjD3yYgd2coZOnFladmpBvcX"
+MODELS_FOLDER_ID = "16aWeMa93w3vWidJMKHgIs451NzKB3A8f"
+
+# ── Paths ─────────────────────────────────────────────────────
+BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
+DATA_PATH  = os.path.join(BASE_DIR, "INDIA_AQI_CLEANED.csv")
+MODELS_DIR = os.path.join(BASE_DIR, "models")
+
+def _gdrive_download(file_id, dest):
+    """Download a file from Google Drive by file ID."""
+    import gdown
+    url = f"https://drive.google.com/uc?id={file_id}"
+    gdown.download(url, dest, quiet=False, fuzzy=True)
+
+@st.cache_resource(show_spinner="Downloading data from Google Drive...")
+def ensure_data():
+    if not os.path.exists(DATA_PATH):
+        st.info("Downloading dataset from Google Drive — first run only, please wait...")
+        os.makedirs(BASE_DIR, exist_ok=True)
+        _gdrive_download(DATA_FILE_ID, DATA_PATH)
+    return DATA_PATH
+
+@st.cache_resource(show_spinner="Downloading models from Google Drive...")
+def ensure_models():
+    os.makedirs(MODELS_DIR, exist_ok=True)
+    import gdown
+    # Download entire models folder
+    folder_url = f"https://drive.google.com/drive/folders/{MODELS_FOLDER_ID}"
+    try:
+        gdown.download_folder(folder_url, output=MODELS_DIR, quiet=False, use_cookies=False)
+    except Exception as e:
+        st.warning(f"Model download issue: {e}")
 SEQ_LEN     = 48
 OWM_API_KEY = "753a506d1f64b7d347b165a1c8326ce3"
 
@@ -162,6 +193,8 @@ def get_personalized_precaution(risk, age, conditions):
 
 @st.cache_data(show_spinner="Loading historical data...")
 def load_data():
+    ensure_data()
+    ensure_models()
     df = pd.read_csv(DATA_PATH)
     df["Datetime"] = pd.to_datetime(df["Datetime"])
     df = df.dropna(subset=["US_AQI"])
